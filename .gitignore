@@ -1,2 +1,6 @@
 .env
 competitions.json
+*.pyc
+__pycache__/
+*.pyo
+*.pyd

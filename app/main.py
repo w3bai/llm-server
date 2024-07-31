@@ -4,6 +4,7 @@ from app.competition.manager import CompetitionManager
 from app.data_ingestion.github_loader import GitHubLoader
 from app.data_ingestion.web_scraper import WebScraper
 from app.data_processing.text_processor import TextProcessor
+from app.data_processing.reranker import Reranker
 from app.database.vector_store import VectorStore
 from app.llm.interface import LLMInterface
 import logging
@@ -15,6 +16,7 @@ github_loader = GitHubLoader()
 text_processor = TextProcessor()
 vector_store = VectorStore()
 llm_interface = LLMInterface()
+reranker = Reranker()
 
 @app.post("/competitions", response_model=CompetitionResponse)
 async def create_competition(competition: CompetitionCreate):
@@ -98,29 +100,21 @@ async def query(query: Query):
     question_embedding = text_processor.generate_embedding(query.question)
 
     logging.info(f"Querying vector store for competition_id: {competition.id}")
-    print(f"Querying vector store for competition_id: {competition.id}")
-    results = vector_store.query(question_embedding, competition.id, top_k=20)
+    results = vector_store.query(question_embedding, competition.id, top_k=50)
     logging.info(f"Query results: {results}")
 
     if not results or not hasattr(results, 'matches') or len(results.matches) == 0:
         logging.warning("No results found in vector store")
         raise HTTPException(status_code=500, detail="No results found in vector store")
 
-    # Extract and rank context
-    context_parts = []
-    for match in results.matches:
-        if hasattr(match, 'metadata') and 'text' in match.metadata:
-            context_parts.append({
-                'text': match.metadata['text'],
-                'score': match.score,
-                'source': match.metadata.get('source', 'Unknown'),
-                'path': match.metadata.get('path', 'Unknown')
-            })
+    # Extract passages for reranking
+    passages = [match.metadata['text'] for match in results.matches if 'text' in match.metadata]
+    
+    # Rerank passages
+    reranked_passages = reranker.rerank(query.question, passages, top_k=10)
 
-    # Sort by score and take top 10
-    context_parts = sorted(context_parts, key=lambda x: x['score'], reverse=True)[:10]
-
-    context = "\n\n".join([f"Source: {part['source']}, Path: {part['path']}\nContent: {part['text']}" for part in context_parts])
+    # Create context from reranked passages
+    context = "\n\n".join([f"Content: {passage}" for passage in reranked_passages])
 
     system_prompt = """You are an AI assistant meant to answer questions about audit contests. Draw your responses from the provided context only. Keep answers concise. Do not speculate. Synthesize information from multiple sources when necessary. If no question is present, response with 'No question is present. Please ask a question.'. """
 
