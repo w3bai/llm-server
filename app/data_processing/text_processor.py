@@ -23,7 +23,7 @@ class TextProcessor:
             initial_chunks = self.chunk_documentation(text)
 
         # Ensure chunks are within token limit
-        max_tokens = 7500  # Leaving some buffer
+        max_tokens = 8000  # Leaving some buffer
         final_chunks = []
         for chunk in initial_chunks:
             if self.estimate_tokens(chunk) > max_tokens:

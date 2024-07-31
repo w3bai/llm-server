@@ -9,5 +9,5 @@ class Config:
     PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     PINECONE_INDEX_NAME = "web3-audit-assistant"
-    CHUNK_SIZE = 2000
-    CHUNK_OVERLAP = 400
+    CHUNK_SIZE = 1000
+    CHUNK_OVERLAP = 200

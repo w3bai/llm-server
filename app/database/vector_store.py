@@ -1,13 +1,19 @@
 from pinecone import Pinecone
 from app.config import Config
+import logging
 
 class VectorStore:
     def __init__(self):
         self.pc = Pinecone(api_key=Config.PINECONE_API_KEY)
         self.index = self.pc.Index(Config.PINECONE_INDEX_NAME)
+        self.logger = logging.getLogger(__name__)
 
     def upsert(self, vectors):
-        self.index.upsert(vectors=vectors)
+        try:
+            self.index.upsert(vectors=vectors)
+            self.logger.info(f"Successfully upserted {len(vectors)} vectors")
+        except Exception as e:
+            self.logger.error(f"Error upserting vectors: {e}")
 
     def delete_by_competition_id(self, competition_id: str):
         # Use query to fetch all vector IDs associated with this competition_id
@@ -36,9 +42,16 @@ class VectorStore:
         print(f"Deleted {len(vector_ids)} vectors for competition {competition_id}")
         
     def query(self, vector, competition_id, top_k=10):
-        return self.index.query(
-            vector=vector,
-            filter={"competition_id": competition_id},
-            top_k=top_k,
-            include_metadata=True
-        )
+        self.logger.info(f"Querying for competition_id: {competition_id}")
+        try:
+            results =  self.index.query(
+                vector=vector,
+                filter={"competition_id": competition_id},
+                top_k=top_k,
+                include_metadata=True
+            )
+            self.logger.info(f"Query returned {len(results.matches)} matches")
+            return results
+        except Exception as e:
+            self.logger.error(f"Error querying vector store: {e}")
+            return None

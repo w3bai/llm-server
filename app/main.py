@@ -94,10 +94,16 @@ async def query(query: Query):
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
 
+    logging.info(f"Generating embedding for question: {query.question}")
     question_embedding = text_processor.generate_embedding(query.question)
-    results = vector_store.query(question_embedding, competition.id, top_k=20)
 
-    if not results or not hasattr(results, 'matches'):
+    logging.info(f"Querying vector store for competition_id: {competition.id}")
+    print(f"Querying vector store for competition_id: {competition.id}")
+    results = vector_store.query(question_embedding, competition.id, top_k=20)
+    logging.info(f"Query results: {results}")
+
+    if not results or not hasattr(results, 'matches') or len(results.matches) == 0:
+        logging.warning("No results found in vector store")
         raise HTTPException(status_code=500, detail="No results found in vector store")
 
     # Extract and rank context
@@ -125,12 +131,11 @@ Question: {query.question}
 
 Please provide a detailed and structured response. Include the following in your answer:
 1. A clear and concise summary of the main points.
-2. Specific details from the context, citing sources when possible.
+2. Specific details from the context.
 3. Any relevant connections or implications not explicitly stated but can be reasonably inferred.
-4. If certain information is missing or unclear, state this explicitly.
 
 Organize your response in a logical manner, using numbered or bulleted lists where appropriate."""
 
-    response = llm_interface.generate_response(system_prompt, human_prompt)
+    response = llm_interface.generate_response(system_prompt, human_prompt, model=query.model)
 
-    return {"response": response}
+    return {"response": response, "model_used": query.model}

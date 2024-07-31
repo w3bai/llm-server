@@ -6,7 +6,7 @@ import uuid
 
 class Competition:
     def __init__(self, id, name: str, github_url: str, docs_url: Optional[str] = None, created_at=None):
-        self.id = str(uuid.uuid4())
+        self.id = id
         self.name = name
         self.github_url = github_url
         self.docs_url = docs_url
@@ -27,7 +27,7 @@ class Competition:
             id=data["id"],
             name=data["name"],
             github_url=data["github_url"],
-            docs_url=data["docs_url"],
+            docs_url=data.get("docs_url"),
             created_at=data["created_at"]
         )
 
@@ -55,10 +55,11 @@ class CompetitionManager:
             json.dump(data, f, indent=2)
 
     def create_competition(self, name, github_url, docs_url=None):
-        competition = Competition(str(len(self.competitions) + 1), name, github_url, docs_url)
-        self.competitions[competition.id] = competition
+        competition_id = str(uuid.uuid4())
+        competition = Competition(competition_id, name, github_url, docs_url)
+        self.competitions[competition_id] = competition
         self.save_competitions()
-        return competition.id
+        return competition_id
 
     def get_competition(self, competition_id):
         return self.competitions.get(competition_id)
