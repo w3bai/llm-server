@@ -7,7 +7,7 @@ class LLMInterface:
         self.anthropic_client = Anthropic(api_key=Config.ANTHROPIC_API_KEY)
         self.openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
 
-    def generate_response(self, system_prompt, human_prompt, model="gpt-4o-mini", max_tokens=1000, temperature=0.35):
+    def generate_response(self, system_prompt, human_prompt, model="gpt-4o-mini", max_tokens=1000, temperature=0):
         if model.startswith("claude"):
             return self.generate_anthropic_response(system_prompt, human_prompt, model, max_tokens, temperature)
         elif model.startswith("gpt"):

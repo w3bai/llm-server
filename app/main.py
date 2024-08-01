@@ -130,26 +130,39 @@ async def query(query: Query):
     # Create context from reranked passages
     context = "\n\n".join([f"Content: {passage}" for passage in reranked_passages])
 
-    system_prompt = """You are an AI assistant specializing in explaining technical processes in blockchain systems and smart contracts. Your responses should be detailed, precise, and focus on practical implementation. Always provide step-by-step explanations, include relevant code snippets or function signatures, and highlight any important considerations or potential issues."""
+    system_prompt = """You are an AI assistant designed to help security researchers and answer their questions about this audit contest."""
 
-    human_prompt = f"""Context for competition '{competition.name}':
+    human_prompt = f"""Your responses should be based solely on the following context:
+'{competition.name}' context
 {context}
 
-Question: {query.question}
+Your task is to answer questions about this audit contest using only the information provided in the context above. Follow these guidelines:
 
-Please provide a comprehensive and technically precise answer. Your response should:
+1. Draw your responses exclusively from the provided context.
+2. Keep your answers concise and to the point.
+3. Do not speculate or provide information beyond what is explicitly stated in the context.
+4. Provide relevant code from the codebase whenever necessary.
+5. If you cannot answer a question based on the given context, state that you don't have enough information to answer.
+6. Use js instead of solidity in codeblocks for highlighting purposes
+7. Do not mention 'context' in your response
 
-1. Start with a brief overview of the process or concept being asked about.
+Scope: Only the files explicitly outlined in the Scope section of the context are considered in scope. Do not reference or use information from any other sources.
+
+When answering, format your response as follows:
+1. Begin with a brief, direct answer to the question
 2. Break down the answer into clear, numbered steps.
 3. For each step, provide:
 - A detailed explanation of what needs to be done
 - The specific function or method to be used, if applicable
 - A code snippet or function signature, where relevant
-4. If relevant, explain how this process fits into the larger system architecture.
-5. Conclude with any final considerations or next steps.
+4. If necessary, provide additional context or explanation from the given information.
+5. If you're quoting directly from the context, use quotation marks and indicate the source.
 
-Use markdown formatting for code snippets, replace solidity with js in the codeblock for highlighting purposes. If any part of the question cannot be answered based on the provided context, clearly state that. Base your entire response solely on the information provided in the context."""
+Here is the question to answer:
 
-    response = llm_interface.generate_response(system_prompt, human_prompt, model=query.model)
+{query.question}
+
+"""
+    response = llm_interface.generate_response(system_prompt, human_prompt)
 
     return {"response": response, "model_used": query.model}
