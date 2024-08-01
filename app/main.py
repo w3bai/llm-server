@@ -78,6 +78,20 @@ async def create_competition(competition: CompetitionCreate):
 async def list_competitions():
     return competition_manager.list_competitions()
 
+@app.get("/competitions/{competition_id}", response_model=CompetitionResponse)
+async def get_competition(competition_id: str):
+    competition = competition_manager.get_competition(competition_id)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+    
+    return CompetitionResponse(
+        id=competition.id,
+        name=competition.name,
+        github_url=competition.github_url,
+        docs_url=competition.docs_url,
+        created_at=competition.created_at
+    )
+    
 @app.delete("/competitions/{competition_id}", response_model=dict)
 async def delete_competition(competition_id: str):
     deleted = competition_manager.delete_competition(competition_id)
