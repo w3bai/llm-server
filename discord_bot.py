@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 from app.config import Config
+from app.competition.manager import CompetitionManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +24,7 @@ bot = commands.Bot(command_prefix=commands.when_mentioned_or('!'), intents=inten
 
 # Mapping of channel IDs to competition IDs
 CHANNEL_TO_COMPETITION = {}
+competition_manager = CompetitionManager()
 
 # URL of your FastAPI application
 API_URL = "http://localhost:8000"  # Update this to your actual API URL
@@ -91,6 +93,7 @@ async def on_message(message):
 
     except Exception as e:
         logger.error(f"Error in on_message: {str(e)}", exc_info=True)
+        await message.channel.send("An error occured. Please try again.")
 
 @bot.command()
 async def ping(ctx):
@@ -98,30 +101,50 @@ async def ping(ctx):
     await ctx.send('Pong!')
     
 @bot.command()
-@commands.guild_only()
 @commands.has_permissions(administrator=True)
-async def map_channel(ctx, channel_id: int, competition_id: str):
+async def map_channel(ctx, channel: discord.TextChannel, competition_id: str):
     """Map a channel to a competition ID (Admin only)"""
-    logger.info(f"map_channel command invoked by {ctx.author} with channel_id={channel_id} and competition_id={competition_id}")
-    CHANNEL_TO_COMPETITION[channel_id] = competition_id
-    await ctx.send(f"Channel {channel_id} mapped to competition {competition_id}")
+    logger.info(f"map_channel command invoked by {ctx.author} with channel={channel.id} and competition_id={competition_id}")
+    
+    competition = competition_manager.get_competition(competition_id)
+    
+    if competition:
+        CHANNEL_TO_COMPETITION[channel.id] = competition_id
+        await ctx.send(f"Channel {channel.mention} mapped to {competition.name}")
+    else:
+        await ctx.send(f"Competition with ID {competition_id} not found.")
+
 
 @bot.command()
-@commands.guild_only()
+@commands.has_permissions(administrator=True)
 async def get_mapping(ctx):
     """Get the current channel-to-competition mapping"""
     logger.info(f"get_mapping command invoked by {ctx.author}")
     if not CHANNEL_TO_COMPETITION:
-        await ctx.send("No channel-to-competition mappings found.")
+        logger.error("No channel-to-competition mappings found.")
+        await ctx.send("No channel-to-competition mappings found.") # TODO: Remove
         return
-    mapping = "\n".join([f"Channel {channel}: Competition {comp}" for channel, comp in CHANNEL_TO_COMPETITION.items()])
-    await ctx.send(f"Current mapping:\n{mapping}")
+
+    mapping_lines = []
+    for channel_id, competition_id in CHANNEL_TO_COMPETITION.items():
+        channel = ctx.guild.get_channel(channel_id)
+        competition = competition_manager.get_competition(competition_id)
+        
+        if channel and competition:
+            mapping_lines.append(f"{channel.mention} :left_right_arrow: {competition.name}")
+        else:
+            mapping_lines.append(f"Channel ID {channel_id}: Competition ID {competition_id} (Not found)")
+    
+    mapping = "\n".join(mapping_lines)
+    await ctx.send(f"Current mappings:\n{mapping}")
 
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.errors.CheckFailure):
-        await ctx.send('You do not have the correct role for this command.')
+        logger.error("You do not have the correct role for this command.")
+        await ctx.send('You do not have the correct role for this command.') # TODO: Remove
     elif isinstance(error, commands.errors.CommandNotFound):
+        logger.error("Command not found")
         pass
     else:
         logger.error(f"Command error: {str(error)}", exc_info=True)
