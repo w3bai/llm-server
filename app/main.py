@@ -116,19 +116,25 @@ async def query(query: Query):
     # Create context from reranked passages
     context = "\n\n".join([f"Content: {passage}" for passage in reranked_passages])
 
-    system_prompt = """You are an AI assistant meant to answer questions about audit contests. Draw your responses from the provided context only. Keep answers concise. Do not speculate. Synthesize information from multiple sources when necessary. If no question is present, response with 'No question is present. Please ask a question.'. """
+    system_prompt = """You are an AI assistant specializing in explaining technical processes in blockchain systems and smart contracts. Your responses should be detailed, precise, and focus on practical implementation. Always provide step-by-step explanations, include relevant code snippets or function signatures, and highlight any important considerations or potential issues."""
 
     human_prompt = f"""Context for competition '{competition.name}':
 {context}
 
 Question: {query.question}
 
-Please provide a detailed and structured response. Include the following in your answer:
-1. A clear and concise summary of the main points.
-2. Specific details from the context.
-3. Any relevant connections or implications not explicitly stated but can be reasonably inferred.
+Please provide a comprehensive and technically precise answer. Your response should:
 
-Organize your response in a logical manner, using numbered or bulleted lists where appropriate."""
+1. Start with a brief overview of the process or concept being asked about.
+2. Break down the answer into clear, numbered steps.
+3. For each step, provide:
+- A detailed explanation of what needs to be done
+- The specific function or method to be used, if applicable
+- A code snippet or function signature, where relevant
+4. If relevant, explain how this process fits into the larger system architecture.
+5. Conclude with any final considerations or next steps.
+
+Use markdown formatting for code snippets, replace solidity with js in the codeblock for highlighting purposes. If any part of the question cannot be answered based on the provided context, clearly state that. Base your entire response solely on the information provided in the context."""
 
     response = llm_interface.generate_response(system_prompt, human_prompt, model=query.model)
 

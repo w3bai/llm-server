@@ -8,6 +8,7 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+    DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
     PINECONE_INDEX_NAME = "web3-audit-assistant"
     CHUNK_SIZE = 1000
     CHUNK_OVERLAP = 200

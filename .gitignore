@@ -4,3 +4,4 @@ competitions.json
 __pycache__/
 *.pyo
 *.pyd
+*.log
