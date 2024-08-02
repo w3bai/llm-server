@@ -10,6 +10,8 @@ class Config:
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
     API_KEY = os.getenv("API_KEY")
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
     PINECONE_INDEX_NAME = "web3-audit-assistant"
     CHUNK_SIZE = 1000
     CHUNK_OVERLAP = 200

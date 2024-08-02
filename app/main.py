@@ -1,18 +1,17 @@
 from fastapi import FastAPI, HTTPException, Depends
 from app.models import CompetitionCreate, CompetitionResponse, Query
-from app.competition.manager import CompetitionManager
 from app.data_ingestion.github_loader import GitHubLoader
 from app.data_ingestion.web_scraper import WebScraper
 from app.data_processing.text_processor import TextProcessor
 from app.data_processing.reranker import Reranker
 from app.database.vector_store import VectorStore
 from app.llm.interface import LLMInterface
+from app.database.supabase_utils import supabase_manager
 from middleware import verify_api_key
 import logging
 
 app = FastAPI()
 
-competition_manager = CompetitionManager()
 github_loader = GitHubLoader()
 text_processor = TextProcessor()
 vector_store = VectorStore()
@@ -25,9 +24,10 @@ async def root():
 
 @app.post("/competitions", response_model=CompetitionResponse, dependencies=[Depends(verify_api_key)])
 async def create_competition(competition: CompetitionCreate):
-    competition_id = competition_manager.create_competition(
+    new_competition = supabase_manager.create_competition(
         competition.name, str(competition.github_url), str(competition.docs_url) if competition.docs_url else None
     )
+    competition_id = new_competition['id']
     
     # Load and process GitHub data
     github_files = github_loader.get_repo_contents(competition.github_url)
@@ -51,7 +51,7 @@ async def create_competition(competition: CompetitionCreate):
 
     # Load and process documentation
     if competition.docs_url:
-        web_scraper = WebScraper(competition.docs_url, verify_ssl=False)  # Set verify_ssl to False
+        web_scraper = WebScraper(competition.docs_url, verify_ssl=False)
         docs = await web_scraper.scrape_site()
         for url, page_data in docs.items():
             chunks = text_processor.chunk_text(page_data['content'], is_code=False)
@@ -70,36 +70,23 @@ async def create_competition(competition: CompetitionCreate):
                 except ValueError as e:
                     logging.warning(f"Skipping chunk due to: {str(e)}")
 
-    created_competition = competition_manager.get_competition(competition_id)
-    return CompetitionResponse(
-        id=created_competition.id,
-        name=created_competition.name,
-        github_url=created_competition.github_url,
-        docs_url=created_competition.docs_url,
-        created_at=created_competition.created_at
-    )
+    return CompetitionResponse(**new_competition)
 
 @app.get("/competitions", dependencies=[Depends(verify_api_key)])
 async def list_competitions():
-    return competition_manager.list_competitions()
+    return supabase_manager.list_competitions()
 
 @app.get("/competitions/{competition_id}", response_model=CompetitionResponse, dependencies=[Depends(verify_api_key)])
 async def get_competition(competition_id: str):
-    competition = competition_manager.get_competition(competition_id)
+    competition = supabase_manager.get_competition(competition_id)
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
     
-    return CompetitionResponse(
-        id=competition.id,
-        name=competition.name,
-        github_url=competition.github_url,
-        docs_url=competition.docs_url,
-        created_at=competition.created_at
-    )
+    return CompetitionResponse(**competition)
     
 @app.delete("/competitions/{competition_id}", response_model=dict, dependencies=[Depends(verify_api_key)])
 async def delete_competition(competition_id: str):
-    deleted = competition_manager.delete_competition(competition_id)
+    deleted = supabase_manager.delete_competition(competition_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Competition not found")
     
@@ -108,18 +95,18 @@ async def delete_competition(competition_id: str):
     
     return {"message": f"Competition {competition_id} has been deleted"}
 
-
 @app.post("/query", dependencies=[Depends(verify_api_key)])
 async def query(query: Query):
-    competition = competition_manager.get_competition(query.competition_id)
+    competition = supabase_manager.get_competition(query.competition_id)
+    print(f"competition\n{competition}")
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
 
     logging.info(f"Generating embedding for question: {query.question}")
     question_embedding = text_processor.generate_embedding(query.question)
 
-    logging.info(f"Querying vector store for competition_id: {competition.id}")
-    results = vector_store.query(question_embedding, competition.id, top_k=50)
+    logging.info(f"Querying vector store for competition_id: {competition['id']}")
+    results = vector_store.query(question_embedding, competition['id'], top_k=50)
     logging.info(f"Query results: {results}")
 
     if not results or not hasattr(results, 'matches') or len(results.matches) == 0:
@@ -138,7 +125,7 @@ async def query(query: Query):
     system_prompt = """You are an AI assistant designed to help security researchers and answer their questions about this audit contest."""
 
     human_prompt = f"""Your responses should be based solely on the following context:
-'{competition.name}' context
+'{competition['name']}' context
 {context}
 
 Your task is to answer questions about this audit contest using only the information provided in the context above. Follow these guidelines:
