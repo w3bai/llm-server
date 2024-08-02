@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from app.models import CompetitionCreate, CompetitionResponse, Query
 from app.competition.manager import CompetitionManager
 from app.data_ingestion.github_loader import GitHubLoader
@@ -7,6 +7,7 @@ from app.data_processing.text_processor import TextProcessor
 from app.data_processing.reranker import Reranker
 from app.database.vector_store import VectorStore
 from app.llm.interface import LLMInterface
+from middleware import verify_api_key
 import logging
 
 app = FastAPI()
@@ -18,7 +19,7 @@ vector_store = VectorStore()
 llm_interface = LLMInterface()
 reranker = Reranker()
 
-@app.post("/competitions", response_model=CompetitionResponse)
+@app.post("/competitions", response_model=CompetitionResponse, dependencies=[Depends(verify_api_key)])
 async def create_competition(competition: CompetitionCreate):
     competition_id = competition_manager.create_competition(
         competition.name, str(competition.github_url), str(competition.docs_url) if competition.docs_url else None
@@ -74,11 +75,11 @@ async def create_competition(competition: CompetitionCreate):
         created_at=created_competition.created_at
     )
 
-@app.get("/competitions")
+@app.get("/competitions", dependencies=[Depends(verify_api_key)])
 async def list_competitions():
     return competition_manager.list_competitions()
 
-@app.get("/competitions/{competition_id}", response_model=CompetitionResponse)
+@app.get("/competitions/{competition_id}", response_model=CompetitionResponse, dependencies=[Depends(verify_api_key)])
 async def get_competition(competition_id: str):
     competition = competition_manager.get_competition(competition_id)
     if not competition:
@@ -92,7 +93,7 @@ async def get_competition(competition_id: str):
         created_at=competition.created_at
     )
     
-@app.delete("/competitions/{competition_id}", response_model=dict)
+@app.delete("/competitions/{competition_id}", response_model=dict, dependencies=[Depends(verify_api_key)])
 async def delete_competition(competition_id: str):
     deleted = competition_manager.delete_competition(competition_id)
     if not deleted:
@@ -104,7 +105,7 @@ async def delete_competition(competition_id: str):
     return {"message": f"Competition {competition_id} has been deleted"}
 
 
-@app.post("/query")
+@app.post("/query", dependencies=[Depends(verify_api_key)])
 async def query(query: Query):
     competition = competition_manager.get_competition(query.competition_id)
     if not competition:
