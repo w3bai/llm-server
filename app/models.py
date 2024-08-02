@@ -18,3 +18,5 @@ class Query(BaseModel):
     competition_id: str
     question: str
     model: str = "gpt-4o-mini" # can use any claude model (claude-3-5-sonnet-20240620) or gpt model
+    client_id: str
+    query_id: str

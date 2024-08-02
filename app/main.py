@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, BackgroundTasks
 from app.models import CompetitionCreate, CompetitionResponse, Query
 from app.data_ingestion.github_loader import GitHubLoader
 from app.data_ingestion.web_scraper import WebScraper
@@ -9,6 +9,8 @@ from app.llm.interface import LLMInterface
 from app.database.supabase_utils import supabase_manager
 from middleware import verify_api_key
 import logging
+import asyncio
+import json
 
 app = FastAPI()
 
@@ -17,6 +19,9 @@ text_processor = TextProcessor()
 vector_store = VectorStore()
 llm_interface = LLMInterface()
 reranker = Reranker()
+
+# Store for active WebSocket connections
+active_connections = {}
 
 @app.get("/")
 async def root():
@@ -95,36 +100,44 @@ async def delete_competition(competition_id: str):
     
     return {"message": f"Competition {competition_id} has been deleted"}
 
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    await websocket.accept()
+    active_connections[client_id] = websocket
+    try:
+        while True:
+            await websocket.receive_text()
+    except:
+        del active_connections[client_id]
+        
 @app.post("/query", dependencies=[Depends(verify_api_key)])
-async def query(query: Query):
+async def query(query: Query, background_tasks: BackgroundTasks):
     competition = supabase_manager.get_competition(query.competition_id)
-    print(f"competition\n{competition}")
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
 
-    logging.info(f"Generating embedding for question: {query.question}")
-    question_embedding = text_processor.generate_embedding(query.question)
+    # Start the LLM query process in the background
+    background_tasks.add_task(process_llm_query, competition, query)
 
-    logging.info(f"Querying vector store for competition_id: {competition['id']}")
-    results = vector_store.query(question_embedding, competition['id'], top_k=50)
-    logging.info(f"Query results: {results}")
+    return {"message": "Query processing started", "status": "pending"}
 
-    if not results or not hasattr(results, 'matches') or len(results.matches) == 0:
-        logging.warning("No results found in vector store")
-        raise HTTPException(status_code=500, detail="No results found in vector store")
+async def process_llm_query(competition, query):
+    try:
+        question_embedding = text_processor.generate_embedding(query.question)
+        results = vector_store.query(question_embedding, competition['id'], top_k=50)
+        
+        if not results or not hasattr(results, 'matches') or len(results.matches) == 0:
+            logging.warning("No results found in vector store")
+            await send_websocket_message(query.client_id, {"error": "No results found in vector store"})
+            return
 
-    # Extract passages for reranking
-    passages = [match.metadata['text'] for match in results.matches if 'text' in match.metadata]
-    
-    # Rerank passages
-    reranked_passages = reranker.rerank(query.question, passages, top_k=10)
+        passages = [match.metadata['text'] for match in results.matches if 'text' in match.metadata]
+        reranked_passages = reranker.rerank(query.question, passages, top_k=10)
+        context = "\n\n".join([f"Content: {passage}" for passage in reranked_passages])
 
-    # Create context from reranked passages
-    context = "\n\n".join([f"Content: {passage}" for passage in reranked_passages])
+        system_prompt = """You are an AI assistant designed to help security researchers and answer their questions about this audit contest."""
 
-    system_prompt = """You are an AI assistant designed to help security researchers and answer their questions about this audit contest."""
-
-    human_prompt = f"""Your responses should be based solely on the following context:
+        human_prompt = f"""Your responses should be based solely on the following context:
 '{competition['name']}' context
 {context}
 
@@ -154,6 +167,18 @@ Here is the question to answer:
 {query.question}
 
 """
-    response = llm_interface.generate_response(system_prompt, human_prompt)
+        response = llm_interface.generate_response(system_prompt, human_prompt)
 
-    return {"response": response, "model_used": query.model}
+        # Send the response back through the WebSocket
+        await send_websocket_message(query.client_id, {"response": response, "query_id": query.query_id})
+
+    except Exception as e:
+        logging.error(f"Error processing LLM query: {str(e)}")
+        await send_websocket_message(query.client_id, {"error": str(e), "query_id": query.query_id})
+
+async def send_websocket_message(client_id, message):
+    print(f"client_id: {client_id}")
+    if client_id in active_connections:
+        print(f"client id: {client_id} is in active_connections: {active_connections}")
+        print(f"message: {message}")
+        await active_connections[client_id].send_text(json.dumps(message))
