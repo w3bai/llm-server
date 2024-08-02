@@ -19,6 +19,10 @@ vector_store = VectorStore()
 llm_interface = LLMInterface()
 reranker = Reranker()
 
+@app.get("/")
+async def root():
+    return {"message": "Server is up and running!"}
+
 @app.post("/competitions", response_model=CompetitionResponse, dependencies=[Depends(verify_api_key)])
 async def create_competition(competition: CompetitionCreate):
     competition_id = competition_manager.create_competition(
