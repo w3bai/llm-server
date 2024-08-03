@@ -29,53 +29,65 @@ async def root():
 
 @app.post("/competitions", response_model=CompetitionResponse, dependencies=[Depends(verify_api_key)])
 async def create_competition(competition: CompetitionCreate):
-    new_competition = supabase_manager.create_competition(
-        competition.name, str(competition.github_url), str(competition.docs_url) if competition.docs_url else None
-    )
-    competition_id = new_competition['id']
-    
-    # Load and process GitHub data
-    github_files = github_loader.get_repo_contents(competition.github_url)
-    for file in github_files:
-        content = github_loader.get_file_content(file)
-        is_code = file.name.endswith(('.sol', '.rs', '.go'))  # Add more extensions as needed
-        chunks = text_processor.chunk_text(content, is_code=is_code)
-        for i, chunk in enumerate(chunks):
-            try:
-                tokens = text_processor.estimate_tokens(chunk)
-                embedding = text_processor.generate_embedding(chunk)
-                logging.info(f"Processing chunk {i} with {tokens} tokens")
-                vector_store.upsert([(f"{competition_id}_github_{file.path}_{i}", embedding, {
-                    "text": chunk,
-                    "source": "github",
-                    "path": file.path,
-                    "competition_id": competition_id
-                })])
-            except ValueError as e:
-                logging.warning(f"Skipping chunk due to: {str(e)}")
-
-    # Load and process documentation
-    if competition.docs_url:
-        web_scraper = WebScraper(competition.docs_url, verify_ssl=False)
-        docs = await web_scraper.scrape_site()
-        for url, page_data in docs.items():
-            chunks = text_processor.chunk_text(page_data['content'], is_code=False)
+    new_competition = None
+    try:
+        new_competition = supabase_manager.create_competition(
+            competition.name, str(competition.github_url), str(competition.docs_url) if competition.docs_url else None
+        )
+        competition_id = new_competition['id']
+        
+        # Load and process GitHub data
+        github_files = github_loader.get_repo_contents(competition.github_url)
+        for file in github_files:
+            content = github_loader.get_file_content(file)
+            is_code = file.name.endswith(('.sol', '.rs', '.go'))  # Add more extensions as needed
+            chunks = text_processor.chunk_text(content, is_code=is_code)
             for i, chunk in enumerate(chunks):
                 try:
                     tokens = text_processor.estimate_tokens(chunk)
                     embedding = text_processor.generate_embedding(chunk)
                     logging.info(f"Processing chunk {i} with {tokens} tokens")
-                    vector_store.upsert([(f"{competition_id}_doc_{url}_{i}", embedding, {
+                    vector_store.upsert([(f"{competition_id}_github_{file.path}_{i}", embedding, {
                         "text": chunk,
-                        "source": "documentation",
-                        "url": url,
-                        "title": page_data['title'],
+                        "source": "github",
+                        "path": file.path,
                         "competition_id": competition_id
                     })])
                 except ValueError as e:
                     logging.warning(f"Skipping chunk due to: {str(e)}")
 
-    return CompetitionResponse(**new_competition)
+        # Load and process documentation
+        if competition.docs_url:
+            web_scraper = WebScraper(competition.docs_url, verify_ssl=False)
+            docs = await web_scraper.scrape_site()
+            for url, page_data in docs.items():
+                chunks = text_processor.chunk_text(page_data['content'], is_code=False)
+                for i, chunk in enumerate(chunks):
+                    try:
+                        tokens = text_processor.estimate_tokens(chunk)
+                        embedding = text_processor.generate_embedding(chunk)
+                        logging.info(f"Processing chunk {i} with {tokens} tokens")
+                        vector_store.upsert([(f"{competition_id}_doc_{url}_{i}", embedding, {
+                            "text": chunk,
+                            "source": "documentation",
+                            "url": url,
+                            "title": page_data['title'],
+                            "competition_id": competition_id
+                        })])
+                    except ValueError as e:
+                        logging.warning(f"Skipping chunk due to: {str(e)}")
+
+        return CompetitionResponse(**new_competition)
+
+    except Exception as e:
+        logging.error(f"Error creating competition: {str(e)}")
+        if new_competition:
+            # Delete the competition from Supabase
+            supabase_manager.delete_competition(new_competition['id'])
+            # Delete associated data from vector store
+            vector_store.delete_by_competition_id(new_competition['id'])
+        raise HTTPException(status_code=500, detail=f"Failed to create competition: {str(e)}")
+
 
 @app.get("/competitions", dependencies=[Depends(verify_api_key)])
 async def list_competitions():
