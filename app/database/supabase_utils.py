@@ -45,5 +45,14 @@ class SupabaseManager:
         )
         return len(response.data) > 0
 
+    def soft_delete_competition(self, competition_id: str) -> Dict:
+        response = (
+            self.supabase.table("competitions")
+            .update({"is_active": False})
+            .eq("id", competition_id)
+            .execute()
+        )
+        return response.data[0] if response.data else None
+
 
 supabase_manager = SupabaseManager()
