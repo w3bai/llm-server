@@ -141,7 +141,7 @@ async def get_competition(competition_id: str):
     dependencies=[Depends(verify_api_key)],
 )
 async def delete_competition(competition_id: str):
-    deleted = supabase_manager.soft_delete_competition(competition_id)
+    deleted = supabase_manager.delete_competition(competition_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Competition not found")
 
