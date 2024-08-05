@@ -10,8 +10,11 @@ from collections import deque
 import time
 import ssl
 
+
 class WebScraper:
-    def __init__(self, base_url, max_depth=5, max_pages=300, delay=0.1, verify_ssl=True):
+    def __init__(
+        self, base_url, max_depth=5, max_pages=300, delay=0.1, verify_ssl=True
+    ):
         self.base_url = base_url
         self.max_depth = max_depth
         self.max_pages = max_pages
@@ -66,25 +69,25 @@ class WebScraper:
                         self.logger.warning(f"No content extracted from {url}")
                         extracted_content = content  # Fallback to raw content
 
-                    soup = BeautifulSoup(content, 'html.parser')
-                    title = soup.title.string if soup.title else ''
-                    
+                    soup = BeautifulSoup(content, "html.parser")
+                    title = soup.title.string if soup.title else ""
+
                     return {
-                        'url': url,
-                        'title': title,
-                        'content': extracted_content,
-                        'raw_html': content,
-                        'depth': depth
+                        "url": url,
+                        "title": title,
+                        "content": extracted_content,
+                        "raw_html": content,
+                        "depth": depth,
                     }
         except ClientError as e:
             self.logger.error(f"Error scraping {url}: {e}")
             return None
 
     def get_links(self, url, content):
-        soup = BeautifulSoup(content, 'html.parser')
+        soup = BeautifulSoup(content, "html.parser")
         links = set()
-        for link in soup.find_all('a', href=True):
-            href = link['href']
+        for link in soup.find_all("a", href=True):
+            href = link["href"]
             full_url = urljoin(url, href)
             if self.is_valid_url(full_url):
                 links.add(full_url)
@@ -94,15 +97,16 @@ class WebScraper:
     def is_valid_url(self, url):
         parsed_url = urlparse(url)
         base_parsed = urlparse(self.base_url)
-        
+
         # Remove the fragment (everything after #) from the URL
         url_without_fragment, _ = urldefrag(url)
-        
+
         return (
-            parsed_url.netloc.endswith(base_parsed.netloc) and 
-            parsed_url.scheme in ('http', 'https') and
-            url_without_fragment not in self.visited_urls
+            parsed_url.netloc.endswith(base_parsed.netloc)
+            and parsed_url.scheme in ("http", "https")
+            and url_without_fragment not in self.visited_urls
         )
+
     async def scrape_site(self):
         await self.setup_robots_parser()
         to_visit = deque([(self.base_url, 0)])  # (url, depth)
@@ -122,18 +126,25 @@ class WebScraper:
                 self.logger.info(f"Successfully scraped {url}")
 
                 if depth < self.max_depth:
-                    new_links = self.get_links(url, page_data['raw_html'])
+                    new_links = self.get_links(url, page_data["raw_html"])
                     self.logger.info(f"Found {len(new_links)} new links on {url}")
                     for link in new_links:
                         url_without_fragment, _ = urldefrag(link)
                         if url_without_fragment not in self.visited_urls:
                             to_visit.append((url_without_fragment, depth + 1))
-                            self.logger.info(f"Added {url_without_fragment} to visit queue at depth {depth + 1}")
+                            self.logger.info(
+                                f"Added {url_without_fragment} to visit queue at depth {depth + 1}"
+                            )
 
-            self.logger.info(f"Queue size: {len(to_visit)}, Scraped so far: {len(scraped_data)}")
+            self.logger.info(
+                f"Queue size: {len(to_visit)}, Scraped so far: {len(scraped_data)}"
+            )
 
-        self.logger.info(f"Finished scraping. Visited {len(self.visited_urls)} URLs, scraped {len(scraped_data)} pages.")
+        self.logger.info(
+            f"Finished scraping. Visited {len(self.visited_urls)} URLs, scraped {len(scraped_data)} pages."
+        )
         return scraped_data
+
 
 # for testing
 if __name__ == "__main__":

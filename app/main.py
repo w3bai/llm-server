@@ -23,36 +23,54 @@ reranker = Reranker()
 # Store for active WebSocket connections
 active_connections = {}
 
+
 @app.get("/")
 async def root():
     return {"message": "Server is up and running!"}
 
-@app.post("/competitions", response_model=CompetitionResponse, dependencies=[Depends(verify_api_key)])
-async def create_competition(competition: CompetitionCreate):
+
+@app.post(
+    "/competitions",
+    response_model=CompetitionResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def scrape_competition(competition: CompetitionCreate):
     new_competition = None
     try:
         new_competition = supabase_manager.create_competition(
-            competition.name, str(competition.github_url), str(competition.docs_url) if competition.docs_url else None
+            competition.name,
+            str(competition.github_url),
+            str(competition.docs_url) if competition.docs_url else None,
         )
-        competition_id = new_competition['id']
-        
+        competition_id = new_competition["id"]
+
         # Load and process GitHub data
         github_files = github_loader.get_repo_contents(competition.github_url)
         for file in github_files:
             content = github_loader.get_file_content(file)
-            is_code = file.name.endswith(('.sol', '.rs', '.go'))  # Add more extensions as needed
+            is_code = file.name.endswith(
+                (".sol", ".rs", ".go")
+            )  # Add more extensions as needed
             chunks = text_processor.chunk_text(content, is_code=is_code)
             for i, chunk in enumerate(chunks):
                 try:
                     tokens = text_processor.estimate_tokens(chunk)
                     embedding = text_processor.generate_embedding(chunk)
                     logging.info(f"Processing chunk {i} with {tokens} tokens")
-                    vector_store.upsert([(f"{competition_id}_github_{file.path}_{i}", embedding, {
-                        "text": chunk,
-                        "source": "github",
-                        "path": file.path,
-                        "competition_id": competition_id
-                    })])
+                    vector_store.upsert(
+                        [
+                            (
+                                f"{competition_id}_github_{file.path}_{i}",
+                                embedding,
+                                {
+                                    "text": chunk,
+                                    "source": "github",
+                                    "path": file.path,
+                                    "competition_id": competition_id,
+                                },
+                            )
+                        ]
+                    )
                 except ValueError as e:
                     logging.warning(f"Skipping chunk due to: {str(e)}")
 
@@ -61,19 +79,27 @@ async def create_competition(competition: CompetitionCreate):
             web_scraper = WebScraper(competition.docs_url, verify_ssl=False)
             docs = await web_scraper.scrape_site()
             for url, page_data in docs.items():
-                chunks = text_processor.chunk_text(page_data['content'], is_code=False)
+                chunks = text_processor.chunk_text(page_data["content"], is_code=False)
                 for i, chunk in enumerate(chunks):
                     try:
                         tokens = text_processor.estimate_tokens(chunk)
                         embedding = text_processor.generate_embedding(chunk)
                         logging.info(f"Processing chunk {i} with {tokens} tokens")
-                        vector_store.upsert([(f"{competition_id}_doc_{url}_{i}", embedding, {
-                            "text": chunk,
-                            "source": "documentation",
-                            "url": url,
-                            "title": page_data['title'],
-                            "competition_id": competition_id
-                        })])
+                        vector_store.upsert(
+                            [
+                                (
+                                    f"{competition_id}_doc_{url}_{i}",
+                                    embedding,
+                                    {
+                                        "text": chunk,
+                                        "source": "documentation",
+                                        "url": url,
+                                        "title": page_data["title"],
+                                        "competition_id": competition_id,
+                                    },
+                                )
+                            ]
+                        )
                     except ValueError as e:
                         logging.warning(f"Skipping chunk due to: {str(e)}")
 
@@ -83,34 +109,47 @@ async def create_competition(competition: CompetitionCreate):
         logging.error(f"Error creating competition: {str(e)}")
         if new_competition:
             # Delete the competition from Supabase
-            supabase_manager.delete_competition(new_competition['id'])
+            supabase_manager.delete_competition(new_competition["id"])
             # Delete associated data from vector store
-            vector_store.delete_by_competition_id(new_competition['id'])
-        raise HTTPException(status_code=500, detail=f"Failed to create competition: {str(e)}")
+            vector_store.delete_by_competition_id(new_competition["id"])
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create competition: {str(e)}"
+        )
 
 
 @app.get("/competitions", dependencies=[Depends(verify_api_key)])
 async def list_competitions():
     return supabase_manager.list_competitions()
 
-@app.get("/competitions/{competition_id}", response_model=CompetitionResponse, dependencies=[Depends(verify_api_key)])
+
+@app.get(
+    "/competitions/{competition_id}",
+    response_model=CompetitionResponse,
+    dependencies=[Depends(verify_api_key)],
+)
 async def get_competition(competition_id: str):
     competition = supabase_manager.get_competition(competition_id)
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
-    
+
     return CompetitionResponse(**competition)
-    
-@app.delete("/competitions/{competition_id}", response_model=dict, dependencies=[Depends(verify_api_key)])
+
+
+@app.delete(
+    "/competitions/{competition_id}",
+    response_model=dict,
+    dependencies=[Depends(verify_api_key)],
+)
 async def delete_competition(competition_id: str):
     deleted = supabase_manager.delete_competition(competition_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Competition not found")
-    
+
     # Delete associated data from vector store
     vector_store.delete_by_competition_id(competition_id)
-    
+
     return {"message": f"Competition {competition_id} has been deleted"}
+
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
@@ -121,7 +160,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             await websocket.receive_text()
     except:
         del active_connections[client_id]
-        
+
+
 @app.post("/query", dependencies=[Depends(verify_api_key)])
 async def query(query: Query, background_tasks: BackgroundTasks):
     competition = supabase_manager.get_competition(query.competition_id)
@@ -133,17 +173,24 @@ async def query(query: Query, background_tasks: BackgroundTasks):
 
     return {"message": "Query processing started", "status": "pending"}
 
+
 async def process_llm_query(competition, query):
     try:
         question_embedding = text_processor.generate_embedding(query.question)
-        results = vector_store.query(question_embedding, competition['id'], top_k=50)
-        
-        if not results or not hasattr(results, 'matches') or len(results.matches) == 0:
+        results = vector_store.query(question_embedding, competition["id"], top_k=50)
+
+        if not results or not hasattr(results, "matches") or len(results.matches) == 0:
             logging.warning("No results found in vector store")
-            await send_websocket_message(query.client_id, {"error": "No results found in vector store"})
+            await send_websocket_message(
+                query.client_id, {"error": "No results found in vector store"}
+            )
             return
 
-        passages = [match.metadata['text'] for match in results.matches if 'text' in match.metadata]
+        passages = [
+            match.metadata["text"]
+            for match in results.matches
+            if "text" in match.metadata
+        ]
         reranked_passages = reranker.rerank(query.question, passages, top_k=10)
         context = "\n\n".join([f"Content: {passage}" for passage in reranked_passages])
 
@@ -182,11 +229,16 @@ Here is the question to answer:
         response = llm_interface.generate_response(system_prompt, human_prompt)
 
         # Send the response back through the WebSocket
-        await send_websocket_message(query.client_id, {"response": response, "query_id": query.query_id})
+        await send_websocket_message(
+            query.client_id, {"response": response, "query_id": query.query_id}
+        )
 
     except Exception as e:
         logging.error(f"Error processing LLM query: {str(e)}")
-        await send_websocket_message(query.client_id, {"error": str(e), "query_id": query.query_id})
+        await send_websocket_message(
+            query.client_id, {"error": str(e), "query_id": query.query_id}
+        )
+
 
 async def send_websocket_message(client_id, message):
     print(f"client_id: {client_id}")

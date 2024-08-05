@@ -6,7 +6,10 @@ import os
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=True)
 
-async def verify_api_key(request: Request, api_key_header: str = Depends(API_KEY_HEADER)):
+
+async def verify_api_key(
+    request: Request, api_key_header: str = Depends(API_KEY_HEADER)
+):
     if api_key_header != Config.API_KEY:
         raise HTTPException(
             status_code=HTTP_403_FORBIDDEN, detail="Could not validate API Key"
