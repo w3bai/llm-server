@@ -8,32 +8,47 @@ class GitHubLoader:
 
     def get_repo_contents(self, repo_url):
         repo = self.github.get_repo(repo_url.split("github.com/")[-1])
-        contents = repo.get_contents("src")
         files = []
+        dirs_to_process = [""]  # Start with the root directory
 
-        # Add root-level .md files
-        root_contents = repo.get_contents("")
-        for content in root_contents:
-            if content.name.endswith(".md") and not content.name.endswith("-report.md"):
-                files.append(content)
+        while dirs_to_process:
+            current_dir = dirs_to_process.pop(0)
+            contents = repo.get_contents(current_dir)
 
-        while contents:
-            file_content = contents.pop(0)
-            if file_content.type == "dir":
-                if "test" not in file_content.path.lower():
-                    contents.extend(repo.get_contents(file_content.path))
-            else:
-                if self.is_relevant_file(file_content):
-                    files.append(file_content)
+            for content in contents:
+                if content.type == "dir":
+                    dirs_to_process.append(content.path)
+                elif self.is_relevant_file(content):
+                    files.append(content)
+
         return files
 
     def is_relevant_file(self, file_content):
         relevant_extensions = (".sol", ".go", ".rs")
-        return (
-            file_content.name.endswith(relevant_extensions)
-            and not file_content.name.endswith("-report.md")
-            and "test" not in file_content.path.lower()
-        )
+        path_parts = file_content.path.split("/")
+
+        # Ignore files ending with 'report.md'
+        if file_content.name.endswith("report.md"):
+            return False
+
+        # Check if the file is in the root directory
+        if len(path_parts) == 1:
+            return file_content.name.endswith("README.md")
+
+        # Ignore files in the 'libs' directory or its subdirectories
+        if (
+            "libs" in path_parts
+            or "lib" in path_parts
+            or "test" in path_parts
+            or "tests" in path_parts
+        ):
+            return False
+
+        # Check if the file is under 'src' directory or its subdirectories
+        if "src" in path_parts:
+            return file_content.name.endswith(relevant_extensions)
+
+        return False
 
     def get_file_content(self, file):
         try:
