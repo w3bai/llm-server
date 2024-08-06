@@ -1,6 +1,10 @@
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.models import CompetitionCreate, CompetitionResponse, Query, FrontendQuery
 from app.data_ingestion.github_loader import GitHubLoader
 from app.data_ingestion.web_scraper import WebScraper
@@ -23,7 +27,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,6 +39,7 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+app.add_middleware(SlowAPIMiddleware)
 
 github_loader = GitHubLoader()
 text_processor = TextProcessor()
@@ -200,7 +208,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
 
 @app.post("/query", dependencies=[Depends(verify_api_key)])
-async def query(query: Query, background_tasks: BackgroundTasks):
+@limiter.limit("5/minute")
+async def query(request: Request, query: Query, background_tasks: BackgroundTasks):
     competition = supabase_manager.get_competition(query.competition_id)
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
@@ -261,7 +270,8 @@ async def send_websocket_message(client_id, message):
 
 
 @app.post("/frontend/query", dependencies=[Depends(verify_api_key)])
-async def frontend_query(query: FrontendQuery):
+@limiter.limit("5/minute")
+async def frontend_query(request: Request, query: FrontendQuery):
     competition = supabase_manager.get_competition(query.competition_id)
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
