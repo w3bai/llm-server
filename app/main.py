@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from app.models import CompetitionCreate, CompetitionResponse, Query
 from app.data_ingestion.github_loader import GitHubLoader
 from app.data_ingestion.web_scraper import WebScraper
@@ -11,8 +12,20 @@ from middleware import verify_api_key
 import logging
 import asyncio
 import json
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 github_loader = GitHubLoader()
 text_processor = TextProcessor()
@@ -27,6 +40,11 @@ active_connections = {}
 @app.get("/")
 async def root():
     return {"message": "Server is up and running!"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
 
 
 @app.post(
@@ -153,13 +171,26 @@ async def delete_competition(competition_id: str):
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    await websocket.accept()
-    active_connections[client_id] = websocket
+    logger.info(f"WebSocket connection attempt from client: {client_id}")
     try:
-        while True:
-            await websocket.receive_text()
-    except:
-        del active_connections[client_id]
+        await websocket.accept()
+        logger.info(f"WebSocket connection accepted for client: {client_id}")
+        active_connections[client_id] = websocket
+        try:
+            while True:
+                data = await websocket.receive_text()
+                logger.info(f"Received message from client {client_id}: {data}")
+                # Echo the message back to the client
+                await websocket.send_text(f"Server received: {data}")
+        except Exception as e:
+            logger.info(f"WebSocket disconnected for client: {client_id}")
+        finally:
+            if client_id in active_connections:
+                del active_connections[client_id]
+    except Exception as e:
+        logger.error(f"Error in WebSocket connection for client {client_id}: {str(e)}")
+    finally:
+        logger.info(f"WebSocket connection closed for client: {client_id}")
 
 
 @app.post("/query", dependencies=[Depends(verify_api_key)])
@@ -241,8 +272,10 @@ Here is the question to answer:
 
 
 async def send_websocket_message(client_id, message):
-    print(f"client_id: {client_id}")
+    logger.info(f"client_id: {client_id}")
     if client_id in active_connections:
-        print(f"client id: {client_id} is in active_connections: {active_connections}")
-        print(f"message: {message}")
+        logger.info(
+            f"client id: {client_id} is in active_connections: {active_connections}"
+        )
+        logger.info(f"message: {message}")
         await active_connections[client_id].send_text(json.dumps(message))
