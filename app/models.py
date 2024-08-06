@@ -25,3 +25,8 @@ class Query(BaseModel):
     )
     client_id: str
     query_id: str
+
+
+class FrontendQuery(BaseModel):
+    competition_id: str
+    question: str

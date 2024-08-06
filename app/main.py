@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from app.models import CompetitionCreate, CompetitionResponse, Query
+from app.models import CompetitionCreate, CompetitionResponse, Query, FrontendQuery
 from app.data_ingestion.github_loader import GitHubLoader
 from app.data_ingestion.web_scraper import WebScraper
 from app.data_processing.text_processor import TextProcessor
@@ -257,3 +258,46 @@ async def send_websocket_message(client_id, message):
         )
         logger.info(f"message: {message}")
         await active_connections[client_id].send_text(json.dumps(message))
+
+
+@app.post("/frontend/query", dependencies=[Depends(verify_api_key)])
+async def frontend_query(query: FrontendQuery):
+    competition = supabase_manager.get_competition(query.competition_id)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    return StreamingResponse(
+        process_frontend_query(competition, query), media_type="text/event-stream"
+    )
+
+
+def process_frontend_query(competition, query):
+    try:
+        question_embedding = text_processor.generate_embedding(query.question)
+        results = vector_store.query(question_embedding, competition["id"], top_k=50)
+
+        if not results or not hasattr(results, "matches") or len(results.matches) == 0:
+            yield "data: No results found in vector store\n\n"
+            return
+
+        passages = [
+            match.metadata["text"]
+            for match in results.matches
+            if "text" in match.metadata
+        ]
+
+        reranked_passages = reranker.rerank(query.question, passages, top_k=10)
+        context = build_context(reranked_passages)
+
+        system_prompt = build_system_prompt()
+        human_prompt = build_human_prompt(competition["name"], context, query.question)
+
+        for token in llm_interface.generate_response_stream(
+            system_prompt, human_prompt
+        ):
+            token = token.replace("\n", "\\n")
+            yield f"data: {token}\n\n"
+
+    except Exception as e:
+        logging.error(f"Error processing LLM query: {str(e)}")
+        yield f"data: Error: {str(e)}\n\n"

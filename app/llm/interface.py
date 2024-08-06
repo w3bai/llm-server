@@ -54,3 +54,26 @@ class LLMInterface:
         return response.choices[0].message.content
 
     # You can add more methods for other models or providers as needed
+
+    def generate_response_stream(
+        self,
+        system_prompt,
+        human_prompt,
+        model="gpt-4o-mini",
+        max_tokens=1000,
+        temperature=0,
+    ):
+        stream = self.openai_client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": human_prompt},
+            ],
+            stream=True,
+        )
+
+        for chunk in stream:
+            if chunk.choices[0].delta.content is not None:
+                yield chunk.choices[0].delta.content
