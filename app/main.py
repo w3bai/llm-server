@@ -214,6 +214,11 @@ async def query(request: Request, query: Query, background_tasks: BackgroundTask
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
 
+    # Create a record in the queries table
+    query_record = supabase_manager.create_query(
+        competition_id=query.competition_id, question=query.question, source="discord"
+    )
+
     # Start the LLM query process in the background
     background_tasks.add_task(process_llm_query, competition, query)
 
@@ -257,6 +262,7 @@ async def process_llm_query(competition, query):
         await send_websocket_message(
             query.client_id, {"error": str(e), "query_id": query.query_id}
         )
+        supabase_manager.update_query(query_id, {"is_success": False})
 
 
 async def send_websocket_message(client_id, message):
@@ -275,6 +281,11 @@ async def frontend_query(request: Request, query: FrontendQuery):
     competition = supabase_manager.get_competition(query.competition_id)
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
+
+    # Create a record in the queries table
+    query_record = supabase_manager.create_query(
+        competition_id=query.competition_id, question=query.question, source="frontend"
+    )
 
     return StreamingResponse(
         process_frontend_query(competition, query), media_type="text/event-stream"
@@ -311,3 +322,4 @@ def process_frontend_query(competition, query):
     except Exception as e:
         logging.error(f"Error processing LLM query: {str(e)}")
         yield f"data: Error: {str(e)}\n\n"
+        supabase_manager.update_query(query_id, {"is_success": False})

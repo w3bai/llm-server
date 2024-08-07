@@ -45,5 +45,41 @@ class SupabaseManager:
         )
         return len(response.data) > 0
 
+    # Query methods
+    def create_query(
+        self, competition_id: str, question: str, source: str, is_success: bool = True
+    ) -> Dict:
+        data = {
+            "competition_id": competition_id,
+            "question": question,
+            "source": source,
+            "is_success": is_success,
+        }
+        response = self.supabase.table("queries").insert(data).execute()
+        return response.data[0] if response.data else None
+
+    def get_query(self, query_id: str) -> Dict:
+        response = (
+            self.supabase.table("queries").select("*").eq("id", query_id).execute()
+        )
+        return response.data[0] if response.data else None
+
+    def list_queries(self, competition_id: Optional[str] = None) -> List[Dict]:
+        query = self.supabase.table("queries").select("*")
+        if competition_id:
+            query = query.eq("competition_id", competition_id)
+        response = query.execute()
+        return response.data
+
+    def update_query(self, query_id: str, data: Dict) -> Dict:
+        response = (
+            self.supabase.table("queries").update(data).eq("id", query_id).execute()
+        )
+        return response.data[0] if response.data else None
+
+    def delete_query(self, query_id: str) -> bool:
+        response = self.supabase.table("queries").delete().eq("id", query_id).execute()
+        return len(response.data) > 0
+
 
 supabase_manager = SupabaseManager()
