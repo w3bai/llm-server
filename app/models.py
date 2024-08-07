@@ -17,6 +17,19 @@ class CompetitionResponse(BaseModel):
     created_at: datetime
 
 
+class CompetitionTaskResponse(BaseModel):
+    competition_id: str
+    status: str
+
+
+class CompetitionStatusResponse(BaseModel):
+    id: str
+    name: str
+    status: str
+    created_at: datetime
+    vector_count: Optional[int] = None
+
+
 class Query(BaseModel):
     competition_id: str
     question: str

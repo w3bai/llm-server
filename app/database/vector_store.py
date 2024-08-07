@@ -56,3 +56,29 @@ class VectorStore:
         except Exception as e:
             self.logger.error(f"Error querying vector store: {e}")
             return None
+
+    def count_vectors(self, competition_id: str) -> int:
+        try:
+            # Use a zero vector to match all vectors
+            zero_vector = [
+                0.0
+            ] * 1536  # Adjust the dimension based on your embedding size
+
+            # Query with a large top_k to get all vectors for the competition_id
+            response = self.index.query(
+                vector=zero_vector,
+                filter={"competition_id": competition_id},
+                top_k=10000,  # Adjust based on expected maximum number of vectors per competition
+                include_metadata=False,
+            )
+
+            # The number of matches is the count of vectors for this competition_id
+            count = len(response.matches)
+
+            self.logger.info(
+                f"Counted {count} vectors for competition_id: {competition_id}"
+            )
+            return count
+        except Exception as e:
+            self.logger.error(f"Error counting vectors: {e}")
+            return 0

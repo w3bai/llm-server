@@ -8,9 +8,18 @@ class SupabaseManager:
         self.supabase: Client = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
 
     def create_competition(
-        self, name: str, github_url: str, docs_url: Optional[str] = None
+        self,
+        name: str,
+        github_url: str,
+        status: str = "pending",
+        docs_url: Optional[str] = None,
     ) -> Dict:
-        data = {"name": name, "github_url": github_url, "docs_url": docs_url}
+        data = {
+            "name": name,
+            "github_url": github_url,
+            "docs_url": docs_url,
+            "status": status,
+        }
         response = self.supabase.table("competitions").insert(data).execute()
         return response.data[0] if response.data else None
 
@@ -44,6 +53,15 @@ class SupabaseManager:
             .execute()
         )
         return len(response.data) > 0
+
+    def get_competition_status(self, competition_id: str) -> Dict:
+        response = (
+            self.supabase.table("competitions")
+            .select("id", "name", "status", "created_at")
+            .eq("id", competition_id)
+            .execute()
+        )
+        return response.data[0] if response.data else None
 
     # Query methods
     def create_query(

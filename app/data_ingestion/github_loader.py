@@ -41,11 +41,12 @@ class GitHubLoader:
             or "lib" in path_parts
             or "test" in path_parts
             or "tests" in path_parts
+            or "scripts" in path_parts
         ):
             return False
 
         # Check if the file is under 'src' directory or its subdirectories
-        if "src" in path_parts:
+        if "src" in path_parts or "contracts" in path_parts:
             return file_content.name.endswith(relevant_extensions)
 
         return False

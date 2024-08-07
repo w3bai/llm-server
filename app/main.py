@@ -1,11 +1,19 @@
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, BackgroundTasks, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from app.models import CompetitionCreate, CompetitionResponse, Query, FrontendQuery
+from app.models import (
+    CompetitionCreate,
+    CompetitionResponse,
+    CompetitionTaskResponse,
+    CompetitionStatusResponse,
+    Query,
+    FrontendQuery,
+)
 from app.data_ingestion.github_loader import GitHubLoader
 from app.data_ingestion.web_scraper import WebScraper
 from app.data_processing.text_processor import TextProcessor
@@ -63,33 +71,61 @@ async def health_check():
 
 @app.post(
     "/competitions",
-    response_model=CompetitionResponse,
+    response_model=CompetitionTaskResponse,
     dependencies=[Depends(verify_api_key)],
 )
-async def scrape_competition(competition: CompetitionCreate):
-    new_competition = None
+def scrape_competition(
+    competition: CompetitionCreate, background_tasks: BackgroundTasks
+):
     try:
+        # Create a new competition with 'pending' status
         new_competition = supabase_manager.create_competition(
-            competition.name,
-            str(competition.github_url),
-            str(competition.docs_url) if competition.docs_url else None,
+            name=competition.name,
+            github_url=str(competition.github_url),
+            docs_url=str(competition.docs_url) if competition.docs_url else None,
+            status="pending",
         )
-        competition_id = new_competition["id"]
 
+        # Start the scraping task in the background
+        background_tasks.add_task(
+            scrape_competition_task, new_competition["id"], competition
+        )
+
+        return CompetitionTaskResponse(
+            competition_id=new_competition["id"], status="pending"
+        )
+
+    except Exception as e:
+        logging.error(f"Error initiating competition creation: {str(e)}")
+        supabase_manager.update_competition, competition_id, {"status": "failed"}
+        raise HTTPException(
+            status_code=500, detail=f"Failed to initiate competition creation: {str(e)}"
+        )
+
+
+async def scrape_competition_task(competition_id: str, competition: CompetitionCreate):
+    try:
         # Load and process GitHub data
-        github_files = github_loader.get_repo_contents(competition.github_url)
+        github_files = await run_in_threadpool(
+            github_loader.get_repo_contents, competition.github_url
+        )
         for file in github_files:
-            content = github_loader.get_file_content(file)
-            is_code = file.name.endswith(
-                (".sol", ".rs", ".go")
-            )  # Add more extensions as needed
-            chunks = text_processor.chunk_text(content, is_code=is_code)
+            content = await run_in_threadpool(github_loader.get_file_content, file)
+            is_code = file.name.endswith((".sol", ".rs", ".go"))
+            chunks = await run_in_threadpool(
+                text_processor.chunk_text, content, is_code=is_code
+            )
             for i, chunk in enumerate(chunks):
                 try:
-                    tokens = text_processor.estimate_tokens(chunk)
-                    embedding = text_processor.generate_embedding(chunk)
+                    tokens = await run_in_threadpool(
+                        text_processor.estimate_tokens, chunk
+                    )
+                    embedding = await run_in_threadpool(
+                        text_processor.generate_embedding, chunk
+                    )
                     logging.info(f"Processing chunk {i} with {tokens} tokens")
-                    vector_store.upsert(
+                    await run_in_threadpool(
+                        vector_store.upsert,
                         [
                             (
                                 f"{competition_id}_github_{file.path}_{i}",
@@ -101,7 +137,7 @@ async def scrape_competition(competition: CompetitionCreate):
                                     "competition_id": competition_id,
                                 },
                             )
-                        ]
+                        ],
                     )
                 except ValueError as e:
                     logging.warning(f"Skipping chunk due to: {str(e)}")
@@ -111,13 +147,20 @@ async def scrape_competition(competition: CompetitionCreate):
             web_scraper = WebScraper(competition.docs_url, verify_ssl=False)
             docs = await web_scraper.scrape_site()
             for url, page_data in docs.items():
-                chunks = text_processor.chunk_text(page_data["content"], is_code=False)
+                chunks = await run_in_threadpool(
+                    text_processor.chunk_text, page_data["content"], is_code=False
+                )
                 for i, chunk in enumerate(chunks):
                     try:
-                        tokens = text_processor.estimate_tokens(chunk)
-                        embedding = text_processor.generate_embedding(chunk)
+                        tokens = await run_in_threadpool(
+                            text_processor.estimate_tokens, chunk
+                        )
+                        embedding = await run_in_threadpool(
+                            text_processor.generate_embedding, chunk
+                        )
                         logging.info(f"Processing chunk {i} with {tokens} tokens")
-                        vector_store.upsert(
+                        await run_in_threadpool(
+                            vector_store.upsert,
                             [
                                 (
                                     f"{competition_id}_doc_{url}_{i}",
@@ -130,23 +173,24 @@ async def scrape_competition(competition: CompetitionCreate):
                                         "competition_id": competition_id,
                                     },
                                 )
-                            ]
+                            ],
                         )
                     except ValueError as e:
                         logging.warning(f"Skipping chunk due to: {str(e)}")
 
-        return CompetitionResponse(**new_competition)
+        # Update competition status to 'completed'
+        await run_in_threadpool(
+            supabase_manager.update_competition, competition_id, {"status": "completed"}
+        )
 
     except Exception as e:
         logging.error(f"Error creating competition: {str(e)}")
-        if new_competition:
-            # Delete the competition from Supabase
-            supabase_manager.delete_competition(new_competition["id"])
-            # Delete associated data from vector store
-            vector_store.delete_by_competition_id(new_competition["id"])
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create competition: {str(e)}"
+        # Update competition status to 'failed'
+        await run_in_threadpool(
+            supabase_manager.update_competition, competition_id, {"status": "failed"}
         )
+        # Delete associated data from vector store
+        await run_in_threadpool(vector_store.delete_by_competition_id, competition_id)
 
 
 @app.get("/competitions", dependencies=[Depends(verify_api_key)])
@@ -165,6 +209,27 @@ async def get_competition(competition_id: str):
         raise HTTPException(status_code=404, detail="Competition not found")
 
     return CompetitionResponse(**competition)
+
+
+@app.get(
+    "/competitions/{competition_id}/status",
+    response_model=CompetitionStatusResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_competition_status(competition_id: str):
+    competition_status = supabase_manager.get_competition_status(competition_id)
+    if not competition_status:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    vector_count = vector_store.count_vectors(competition_id)
+
+    return CompetitionStatusResponse(
+        id=competition_status["id"],
+        name=competition_status["name"],
+        status=competition_status["status"],
+        created_at=competition_status["created_at"],
+        vector_count=vector_count,
+    )
 
 
 @app.delete(
