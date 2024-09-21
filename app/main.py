@@ -144,39 +144,28 @@ async def scrape_competition_task(competition_id: str, competition: CompetitionC
 
         # Load and process documentation
         if competition.docs_url:
-            web_scraper = WebScraper(competition.docs_url, verify_ssl=False)
-            docs = await web_scraper.scrape_site()
-            for url, page_data in docs.items():
-                chunks = await run_in_threadpool(
-                    text_processor.chunk_text, page_data["content"], is_code=False
-                )
-                for i, chunk in enumerate(chunks):
-                    try:
-                        tokens = await run_in_threadpool(
-                            text_processor.estimate_tokens, chunk
-                        )
-                        embedding = await run_in_threadpool(
-                            text_processor.generate_embedding, chunk
-                        )
-                        logging.info(f"Processing chunk {i} with {tokens} tokens")
-                        await run_in_threadpool(
-                            vector_store.upsert,
-                            [
-                                (
-                                    f"{competition_id}_doc_{url}_{i}",
-                                    embedding,
-                                    {
-                                        "text": chunk,
-                                        "source": "documentation",
-                                        "url": url,
-                                        "title": page_data["title"],
-                                        "competition_id": competition_id,
-                                    },
-                                )
-                            ],
-                        )
-                    except ValueError as e:
-                        logging.warning(f"Skipping chunk due to: {str(e)}")
+            web_scraper = WebScraper(competition.docs_url, max_pages=300)
+            crawl_status = await web_scraper.scrape_site()
+
+            # Process pages as they are crawled
+            while crawl_status["status"] != "completed":
+                for page in crawl_status["data"]:
+                    await process_page(page, competition_id)
+
+                # If there are more pages to fetch
+                if crawl_status.get("next"):
+                    crawl_status = await web_scraper.get_scraped_data(
+                        crawl_status["next"]
+                    )
+                else:
+                    await asyncio.sleep(30)  # Wait before checking again
+                    crawl_status = await web_scraper.get_scraped_data(
+                        crawl_status["id"]
+                    )
+
+            # Process any remaining pages in the final batch
+            for page in crawl_status["data"]:
+                await process_page(page, competition_id)
 
         # Update competition status to 'completed'
         await run_in_threadpool(
@@ -191,6 +180,36 @@ async def scrape_competition_task(competition_id: str, competition: CompetitionC
         )
         # Delete associated data from vector store
         await run_in_threadpool(vector_store.delete_by_competition_id, competition_id)
+
+
+async def process_page(page, competition_id):
+    content = page["markdown"]  # Use markdown content
+    chunks = await run_in_threadpool(text_processor.chunk_text, content, is_code=False)
+    for i, chunk in enumerate(chunks):
+        try:
+            tokens = await run_in_threadpool(text_processor.estimate_tokens, chunk)
+            embedding = await run_in_threadpool(
+                text_processor.generate_embedding, chunk
+            )
+            logging.info(f"Processing chunk {i} with {tokens} tokens")
+            await run_in_threadpool(
+                vector_store.upsert,
+                [
+                    (
+                        f"{competition_id}_doc_{page['metadata']['sourceURL']}_{i}",
+                        embedding,
+                        {
+                            "text": chunk,
+                            "source": "documentation",
+                            "url": page["metadata"]["sourceURL"],
+                            "title": page["metadata"]["title"],
+                            "competition_id": competition_id,
+                        },
+                    )
+                ],
+            )
+        except ValueError as e:
+            logging.warning(f"Skipping chunk due to: {str(e)}")
 
 
 @app.get("/competitions", dependencies=[Depends(verify_api_key)])
@@ -308,7 +327,7 @@ async def process_llm_query(competition, query):
             if "text" in match.metadata
         ]
 
-        reranked_passages = reranker.rerank(query.question, passages, top_k=10)
+        reranked_passages = reranker.rerank(query.question, passages, top_k=20)
 
         context = build_context(reranked_passages)
 
