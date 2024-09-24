@@ -16,3 +16,4 @@ aiohttp==3.10.0
 supabase==2.6.0
 slowapi==0.1.9
 firecrawl-py==1.2.4
+lxml_html_clean==0.2.2
