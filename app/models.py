@@ -4,6 +4,7 @@ from datetime import datetime
 
 
 class CompetitionCreate(BaseModel):
+    secret_key: Optional[str] = None
     name: str
     github_url: str
     docs_url: Optional[str] = None

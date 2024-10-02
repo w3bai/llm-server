@@ -10,6 +10,22 @@
     <div class="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-md">
       <h1 class="text-2xl font-bold mb-6">Data Ingestion</h1>
 
+      <!-- Add this new section for the password input -->
+      <div class="mb-4">
+        <label for="secret-key" class="block text-sm font-medium text-gray-700"
+          >Secret Key</label
+        >
+        <input
+          type="password"
+          name="secret-key"
+          id="secret-key"
+          class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+          placeholder="Enter the secret key"
+          required
+        />
+      </div>
+
+      <!-- Rest of the form remains the same -->
       <div class="mb-4">
         <label
           for="competition-name"
@@ -63,7 +79,7 @@
           <input
             type="text"
             id="extension-filter"
-            placeholder="Filter by extension (e.g., .py)"
+            placeholder="Filter by extension (e.g., .sol)"
             class="flex-grow px-2 py-1 border rounded"
           />
           <button
@@ -122,6 +138,7 @@
 
     <script>
       const API_KEY = "{{ api_key }}"; // This will be replaced by the server with the actual API key
+      const secretKeyInput = document.getElementById("secret-key");
       const competitionNameInput = document.getElementById("competition-name");
       const githubRepoInput = document.getElementById("github-repo");
       const loadFilesButton = document.getElementById("load-files");
@@ -147,6 +164,7 @@
 
       function updateStartIngestionButton() {
         startIngestionButton.disabled =
+          !secretKeyInput.value.trim() ||
           !competitionNameInput.value.trim() ||
           !githubRepoInput.value.trim() ||
           fileList.children.length === 0;
@@ -167,6 +185,7 @@
         updateStartIngestionButton();
       }
 
+      secretKeyInput.addEventListener("input", updateStartIngestionButton);
       competitionNameInput.addEventListener(
         "input",
         updateStartIngestionButton
@@ -222,6 +241,7 @@
       });
 
       startIngestionButton.addEventListener("click", async () => {
+        const secretKey = secretKeyInput.value.trim();
         const competitionName = competitionNameInput.value.trim();
         const repoUrl = githubRepoInput.value.trim();
         const docsUrl = document.getElementById("docs-url").value.trim();
@@ -230,14 +250,15 @@
           fileList.querySelectorAll('input[type="checkbox"]:checked')
         ).map((cb) => cb.value);
 
-        if (!competitionName || !repoUrl) {
+        if (!secretKey || !competitionName || !repoUrl) {
           alert(
-            "Please enter both a competition name and a GitHub repository URL."
+            "Please enter the secret key, competition name, and GitHub repository URL."
           );
           return;
         }
 
         const data = {
+          secret_key: secretKey,
           name: competitionName,
           github_url: repoUrl,
           docs_url: docsUrl || null,
@@ -260,7 +281,8 @@
           });
 
           if (!response.ok) {
-            throw new Error("Ingestion failed");
+            const errorData = await response.json();
+            throw new Error(errorData.detail || "Ingestion failed");
           }
 
           const result = await response.json();
@@ -269,7 +291,7 @@
           );
         } catch (error) {
           console.error("Error:", error);
-          alert("Ingestion failed. Please try again.");
+          alert(`Ingestion failed: ${error.message}`);
         } finally {
           setLoading(startIngestionButton, false);
         }

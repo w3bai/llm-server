@@ -26,6 +26,7 @@ from app.utils.prompt_helpers import (
     build_human_prompt,
     build_context,
 )
+from app.config import Config
 from middleware import verify_api_key
 import logging
 import asyncio
@@ -257,6 +258,10 @@ async def process_ingestion(competition_id: str, competition: CompetitionCreate)
 async def create_competition(
     competition: CompetitionCreate, background_tasks: BackgroundTasks
 ):
+    # Verify the secret key
+    if competition.secret_key != Config.INGESTION_SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Invalid secret key")
+
     try:
         # Create a new competition with 'pending' status
         new_competition = supabase_manager.create_competition(

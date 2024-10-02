@@ -40,3 +40,4 @@ class Config:
         "contracts",
         "",
     )  # Empty string for root directory
+    INGESTION_SECRET_KEY = os.getenv("INGESTION_SECRET_KEY")
