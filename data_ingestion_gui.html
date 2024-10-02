@@ -11,6 +11,22 @@
       <h1 class="text-2xl font-bold mb-6">Data Ingestion</h1>
 
       <div class="mb-4">
+        <label
+          for="competition-name"
+          class="block text-sm font-medium text-gray-700"
+          >Competition Name</label
+        >
+        <input
+          type="text"
+          name="competition-name"
+          id="competition-name"
+          class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+          placeholder="Enter competition name"
+          required
+        />
+      </div>
+
+      <div class="mb-4">
         <label for="github-repo" class="block text-sm font-medium text-gray-700"
           >GitHub Repository URL</label
         >
@@ -21,6 +37,7 @@
             id="github-repo"
             class="flex-1 min-w-0 block w-full px-3 py-2 rounded-l-md border border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
             placeholder="https://github.com/username/repo"
+            required
           />
           <button
             type="button"
@@ -87,6 +104,7 @@
           name="additional-info"
           rows="3"
           class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+          placeholder="Enter any additional information here"
         ></textarea>
       </div>
 
@@ -104,6 +122,7 @@
 
     <script>
       const API_KEY = "{{ api_key }}"; // This will be replaced by the server with the actual API key
+      const competitionNameInput = document.getElementById("competition-name");
       const githubRepoInput = document.getElementById("github-repo");
       const loadFilesButton = document.getElementById("load-files");
       const fileList = document.getElementById("file-list");
@@ -111,6 +130,7 @@
       const selectAllButton = document.getElementById("select-all");
       const extensionFilter = document.getElementById("extension-filter");
       const applyFilterButton = document.getElementById("apply-filter");
+      const additionalInfoInput = document.getElementById("additional-info");
 
       let allFiles = [];
 
@@ -127,7 +147,9 @@
 
       function updateStartIngestionButton() {
         startIngestionButton.disabled =
-          !githubRepoInput.value.trim() || fileList.children.length === 0;
+          !competitionNameInput.value.trim() ||
+          !githubRepoInput.value.trim() ||
+          fileList.children.length === 0;
       }
 
       function renderFileList(files) {
@@ -145,6 +167,10 @@
         updateStartIngestionButton();
       }
 
+      competitionNameInput.addEventListener(
+        "input",
+        updateStartIngestionButton
+      );
       githubRepoInput.addEventListener("input", updateStartIngestionButton);
 
       loadFilesButton.addEventListener("click", async () => {
@@ -162,7 +188,7 @@
             `/api/repo-files?repo_url=${encodeURIComponent(repoUrl)}`,
             {
               headers: {
-                Authorization: `Bearer ${API_KEY}`,
+                "X-API-Key": API_KEY,
               },
             }
           );
@@ -196,20 +222,27 @@
       });
 
       startIngestionButton.addEventListener("click", async () => {
+        const competitionName = competitionNameInput.value.trim();
         const repoUrl = githubRepoInput.value.trim();
         const docsUrl = document.getElementById("docs-url").value.trim();
-        const additionalInfo = document
-          .getElementById("additional-info")
-          .value.trim();
+        const additionalInfo = additionalInfoInput.value.trim();
         const selectedFiles = Array.from(
           fileList.querySelectorAll('input[type="checkbox"]:checked')
         ).map((cb) => cb.value);
 
+        if (!competitionName || !repoUrl) {
+          alert(
+            "Please enter both a competition name and a GitHub repository URL."
+          );
+          return;
+        }
+
         const data = {
-          github_repo: repoUrl,
-          docs_url: docsUrl,
-          additional_info: additionalInfo,
+          name: competitionName,
+          github_url: repoUrl,
+          docs_url: docsUrl || null,
           selected_files: selectedFiles,
+          additional_info: additionalInfo,
         };
 
         startIngestionButton.dataset.originalText =
@@ -217,11 +250,11 @@
         setLoading(startIngestionButton, true);
 
         try {
-          const response = await fetch("/api/ingest", {
+          const response = await fetch("/competitions", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${API_KEY}`,
+              "X-API-Key": API_KEY,
             },
             body: JSON.stringify(data),
           });
@@ -231,7 +264,9 @@
           }
 
           const result = await response.json();
-          alert(result.message);
+          alert(
+            `Competition created successfully. Competition ID: ${result.competition_id}`
+          );
         } catch (error) {
           console.error("Error:", error);
           alert("Ingestion failed. Please try again.");

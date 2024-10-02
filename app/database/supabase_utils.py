@@ -13,12 +13,14 @@ class SupabaseManager:
         github_url: str,
         status: str = "pending",
         docs_url: Optional[str] = None,
+        additional_info: Optional[str] = None,
     ) -> Dict:
         data = {
             "name": name,
             "github_url": github_url,
             "docs_url": docs_url,
             "status": status,
+            "additional_info": additional_info,
         }
         response = self.supabase.table("competitions").insert(data).execute()
         return response.data[0] if response.data else None

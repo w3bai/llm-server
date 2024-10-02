@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -7,6 +7,8 @@ class CompetitionCreate(BaseModel):
     name: str
     github_url: str
     docs_url: Optional[str] = None
+    selected_files: List[str]
+    additional_info: Optional[str] = None
 
 
 class CompetitionResponse(BaseModel):
@@ -15,6 +17,7 @@ class CompetitionResponse(BaseModel):
     github_url: str
     docs_url: Optional[str] = None
     created_at: datetime
+    status: str
 
 
 class CompetitionTaskResponse(BaseModel):

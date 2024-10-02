@@ -120,7 +120,14 @@ async def process_ingestion(competition_id: str, competition: CompetitionCreate)
         github_files = await run_in_threadpool(
             github_loader.get_repo_contents, competition.github_url
         )
-        for file in github_files:
+
+        # Filter files based on selected_files
+        selected_files = set(competition.selected_files)
+        files_to_process = [
+            file for file in github_files if file.path in selected_files
+        ]
+
+        for file in files_to_process:
             content = await run_in_threadpool(github_loader.get_file_content, file)
             is_code = file.name.endswith((".sol", ".rs", ".go"))
             chunks = await run_in_threadpool(
@@ -189,6 +196,39 @@ async def process_ingestion(competition_id: str, competition: CompetitionCreate)
                     except ValueError as e:
                         logging.warning(f"Skipping chunk due to: {str(e)}")
 
+        # Process additional information
+        if competition.additional_info:
+            chunks = await run_in_threadpool(
+                text_processor.chunk_text, competition.additional_info, is_code=False
+            )
+            for i, chunk in enumerate(chunks):
+                try:
+                    tokens = await run_in_threadpool(
+                        text_processor.estimate_tokens, chunk
+                    )
+                    embedding = await run_in_threadpool(
+                        text_processor.generate_embedding, chunk
+                    )
+                    logging.info(
+                        f"Processing additional info chunk {i} with {tokens} tokens"
+                    )
+                    await run_in_threadpool(
+                        vector_store.upsert,
+                        [
+                            (
+                                f"{competition_id}_additional_info_{i}",
+                                embedding,
+                                {
+                                    "text": chunk,
+                                    "source": "additional_info",
+                                    "competition_id": competition_id,
+                                },
+                            )
+                        ],
+                    )
+                except ValueError as e:
+                    logging.warning(f"Skipping chunk due to: {str(e)}")
+
         # Update competition status to 'completed'
         await run_in_threadpool(
             supabase_manager.update_competition, competition_id, {"status": "completed"}
@@ -212,35 +252,66 @@ async def process_ingestion(competition_id: str, competition: CompetitionCreate)
 @app.post(
     "/competitions",
     response_model=CompetitionTaskResponse,
-    dependencies=[Depends(verify_api_key)],
+    # dependencies=[Depends(verify_api_key)],
 )
-def scrape_competition(
+async def create_competition(
     competition: CompetitionCreate, background_tasks: BackgroundTasks
 ):
     try:
         # Create a new competition with 'pending' status
         new_competition = supabase_manager.create_competition(
             name=competition.name,
-            github_url=str(competition.github_url),
-            docs_url=str(competition.docs_url) if competition.docs_url else None,
+            github_url=competition.github_url,
+            docs_url=competition.docs_url,
             status="pending",
+            additional_info=competition.additional_info,
         )
 
-        # Start the scraping task in the background
-        background_tasks.add_task(
-            scrape_competition_task, new_competition["id"], competition
-        )
+        # Start the ingestion process in the background
+        background_tasks.add_task(process_ingestion, new_competition["id"], competition)
 
         return CompetitionTaskResponse(
             competition_id=new_competition["id"], status="pending"
         )
-
     except Exception as e:
         logging.error(f"Error initiating competition creation: {str(e)}")
-        supabase_manager.update_competition, competition_id, {"status": "failed"}
         raise HTTPException(
             status_code=500, detail=f"Failed to initiate competition creation: {str(e)}"
         )
+
+
+# @app.post(
+#     "/competitions",
+#     response_model=CompetitionTaskResponse,
+#     dependencies=[Depends(verify_api_key)],
+# )
+# def scrape_competition(
+#     competition: CompetitionCreate, background_tasks: BackgroundTasks
+# ):
+#     try:
+#         # Create a new competition with 'pending' status
+#         new_competition = supabase_manager.create_competition(
+#             name=competition.name,
+#             github_url=str(competition.github_url),
+#             docs_url=str(competition.docs_url) if competition.docs_url else None,
+#             status="pending",
+#         )
+
+#         # Start the scraping task in the background
+#         background_tasks.add_task(
+#             scrape_competition_task, new_competition["id"], competition
+#         )
+
+#         return CompetitionTaskResponse(
+#             competition_id=new_competition["id"], status="pending"
+#         )
+
+#     except Exception as e:
+#         logging.error(f"Error initiating competition creation: {str(e)}")
+#         supabase_manager.update_competition, competition_id, {"status": "failed"}
+#         raise HTTPException(
+#             status_code=500, detail=f"Failed to initiate competition creation: {str(e)}"
+#         )
 
 
 async def scrape_competition_task(competition_id: str, competition: CompetitionCreate):
