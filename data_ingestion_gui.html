@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Data Ingestion GUI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-100 p-8">
+    <div class="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-md">
+      <h1 class="text-2xl font-bold mb-6">Data Ingestion</h1>
+
+      <div class="mb-4">
+        <label for="github-repo" class="block text-sm font-medium text-gray-700"
+          >GitHub Repository URL</label
+        >
+        <div class="mt-1 flex rounded-md shadow-sm">
+          <input
+            type="text"
+            name="github-repo"
+            id="github-repo"
+            class="flex-1 min-w-0 block w-full px-3 py-2 rounded-l-md border border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="https://github.com/username/repo"
+          />
+          <button
+            type="button"
+            id="load-files"
+            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-r-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          >
+            Load Files
+          </button>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label for="file-list" class="block text-sm font-medium text-gray-700"
+          >Repository Files</label
+        >
+        <div class="mt-1 flex items-center mb-2">
+          <button
+            id="select-all"
+            class="mr-2 px-2 py-1 text-sm bg-gray-200 hover:bg-gray-300 rounded"
+          >
+            Select All
+          </button>
+          <input
+            type="text"
+            id="extension-filter"
+            placeholder="Filter by extension (e.g., .py)"
+            class="flex-grow px-2 py-1 border rounded"
+          />
+          <button
+            id="apply-filter"
+            class="ml-2 px-2 py-1 text-sm bg-gray-200 hover:bg-gray-300 rounded"
+          >
+            Apply
+          </button>
+        </div>
+        <div class="border border-gray-300 rounded-md p-2 h-60 overflow-y-auto">
+          <ul id="file-list" class="space-y-1">
+            <!-- Files will be populated here -->
+          </ul>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label for="docs-url" class="block text-sm font-medium text-gray-700"
+          >Documentation URL</label
+        >
+        <input
+          type="text"
+          name="docs-url"
+          id="docs-url"
+          class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+          placeholder="https://docs.example.com"
+        />
+      </div>
+
+      <div class="mb-4">
+        <label
+          for="additional-info"
+          class="block text-sm font-medium text-gray-700"
+          >Additional Information</label
+        >
+        <textarea
+          id="additional-info"
+          name="additional-info"
+          rows="3"
+          class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+        ></textarea>
+      </div>
+
+      <div>
+        <button
+          type="button"
+          id="start-ingestion"
+          class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          disabled
+        >
+          Start Ingestion
+        </button>
+      </div>
+    </div>
+
+    <script>
+      const API_KEY = "{{ api_key }}"; // This will be replaced by the server with the actual API key
+      const githubRepoInput = document.getElementById("github-repo");
+      const loadFilesButton = document.getElementById("load-files");
+      const fileList = document.getElementById("file-list");
+      const startIngestionButton = document.getElementById("start-ingestion");
+      const selectAllButton = document.getElementById("select-all");
+      const extensionFilter = document.getElementById("extension-filter");
+      const applyFilterButton = document.getElementById("apply-filter");
+
+      let allFiles = [];
+
+      function setLoading(element, isLoading) {
+        if (isLoading) {
+          element.disabled = true;
+          element.innerHTML =
+            '<svg class="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading...';
+        } else {
+          element.disabled = false;
+          element.textContent = element.dataset.originalText;
+        }
+      }
+
+      function updateStartIngestionButton() {
+        startIngestionButton.disabled =
+          !githubRepoInput.value.trim() || fileList.children.length === 0;
+      }
+
+      function renderFileList(files) {
+        fileList.innerHTML = "";
+        files.forEach((file) => {
+          const li = document.createElement("li");
+          li.innerHTML = `
+            <label class="flex items-center space-x-2">
+              <input type="checkbox" value="${file}" class="form-checkbox">
+              <span>${file}</span>
+            </label>
+          `;
+          fileList.appendChild(li);
+        });
+        updateStartIngestionButton();
+      }
+
+      githubRepoInput.addEventListener("input", updateStartIngestionButton);
+
+      loadFilesButton.addEventListener("click", async () => {
+        const repoUrl = githubRepoInput.value.trim();
+        if (!repoUrl) {
+          alert("Please enter a GitHub repository URL");
+          return;
+        }
+
+        loadFilesButton.dataset.originalText = loadFilesButton.textContent;
+        setLoading(loadFilesButton, true);
+
+        try {
+          const response = await fetch(
+            `/api/repo-files?repo_url=${encodeURIComponent(repoUrl)}`,
+            {
+              headers: {
+                Authorization: `Bearer ${API_KEY}`,
+              },
+            }
+          );
+          if (!response.ok) {
+            throw new Error("Failed to fetch repository files");
+          }
+          allFiles = await response.json();
+          renderFileList(allFiles);
+        } catch (error) {
+          console.error("Error:", error);
+          alert(
+            "Failed to load repository files. Please check the URL and try again."
+          );
+        } finally {
+          setLoading(loadFilesButton, false);
+        }
+      });
+
+      selectAllButton.addEventListener("click", () => {
+        const checkboxes = fileList.querySelectorAll('input[type="checkbox"]');
+        const allChecked = Array.from(checkboxes).every((cb) => cb.checked);
+        checkboxes.forEach((cb) => (cb.checked = !allChecked));
+      });
+
+      applyFilterButton.addEventListener("click", () => {
+        const extension = extensionFilter.value.trim().toLowerCase();
+        const filteredFiles = extension
+          ? allFiles.filter((file) => file.toLowerCase().endsWith(extension))
+          : allFiles;
+        renderFileList(filteredFiles);
+      });
+
+      startIngestionButton.addEventListener("click", async () => {
+        const repoUrl = githubRepoInput.value.trim();
+        const docsUrl = document.getElementById("docs-url").value.trim();
+        const additionalInfo = document
+          .getElementById("additional-info")
+          .value.trim();
+        const selectedFiles = Array.from(
+          fileList.querySelectorAll('input[type="checkbox"]:checked')
+        ).map((cb) => cb.value);
+
+        const data = {
+          github_repo: repoUrl,
+          docs_url: docsUrl,
+          additional_info: additionalInfo,
+          selected_files: selectedFiles,
+        };
+
+        startIngestionButton.dataset.originalText =
+          startIngestionButton.textContent;
+        setLoading(startIngestionButton, true);
+
+        try {
+          const response = await fetch("/api/ingest", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${API_KEY}`,
+            },
+            body: JSON.stringify(data),
+          });
+
+          if (!response.ok) {
+            throw new Error("Ingestion failed");
+          }
+
+          const result = await response.json();
+          alert(result.message);
+        } catch (error) {
+          console.error("Error:", error);
+          alert("Ingestion failed. Please try again.");
+        } finally {
+          setLoading(startIngestionButton, false);
+        }
+      });
+    </script>
+  </body>
+</html>

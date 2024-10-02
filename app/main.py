@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, BackgroundTasks, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -67,6 +67,146 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+
+@app.get("/gui")
+async def get_gui():
+    with open("data_ingestion_gui.html", "r") as file:
+        html_content = file.read()
+    return HTMLResponse(content=html_content, status_code=200)
+
+
+@app.get("/api/repo-files")
+async def get_repo_files(repo_url: str):
+    try:
+        files = github_loader.get_repo_contents(repo_url)
+        return [file.path for file in files]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post(
+    "/api/ingest",
+    response_model=CompetitionTaskResponse,
+)
+async def ingest_data(
+    competition: CompetitionCreate, background_tasks: BackgroundTasks
+):
+    try:
+        # Create a new competition with 'pending' status
+        new_competition = supabase_manager.create_competition(
+            name=competition.name,
+            github_url=str(competition.github_url),
+            docs_url=str(competition.docs_url) if competition.docs_url else None,
+            status="pending",
+        )
+
+        # Start the ingestion process in the background
+        background_tasks.add_task(process_ingestion, new_competition["id"], competition)
+
+        return CompetitionTaskResponse(
+            competition_id=new_competition["id"], status="pending"
+        )
+    except Exception as e:
+        logging.error(f"Error initiating data ingestion: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to initiate data ingestion: {str(e)}"
+        )
+
+
+async def process_ingestion(competition_id: str, competition: CompetitionCreate):
+    try:
+        # Process GitHub repository
+        github_files = await run_in_threadpool(
+            github_loader.get_repo_contents, competition.github_url
+        )
+        for file in github_files:
+            content = await run_in_threadpool(github_loader.get_file_content, file)
+            is_code = file.name.endswith((".sol", ".rs", ".go"))
+            chunks = await run_in_threadpool(
+                text_processor.chunk_text, content, is_code=is_code
+            )
+            for i, chunk in enumerate(chunks):
+                try:
+                    tokens = await run_in_threadpool(
+                        text_processor.estimate_tokens, chunk
+                    )
+                    embedding = await run_in_threadpool(
+                        text_processor.generate_embedding, chunk
+                    )
+                    logging.info(f"Processing chunk {i} with {tokens} tokens")
+                    await run_in_threadpool(
+                        vector_store.upsert,
+                        [
+                            (
+                                f"{competition_id}_github_{file.path}_{i}",
+                                embedding,
+                                {
+                                    "text": chunk,
+                                    "source": "github",
+                                    "path": file.path,
+                                    "competition_id": competition_id,
+                                },
+                            )
+                        ],
+                    )
+                except ValueError as e:
+                    logging.warning(f"Skipping chunk due to: {str(e)}")
+
+        # Process documentation URL
+        if competition.docs_url:
+            web_scraper = WebScraper(competition.docs_url, verify_ssl=False)
+            docs = await web_scraper.scrape_site()
+            for url, page_data in docs.items():
+                chunks = await run_in_threadpool(
+                    text_processor.chunk_text, page_data["content"], is_code=False
+                )
+                for i, chunk in enumerate(chunks):
+                    try:
+                        tokens = await run_in_threadpool(
+                            text_processor.estimate_tokens, chunk
+                        )
+                        embedding = await run_in_threadpool(
+                            text_processor.generate_embedding, chunk
+                        )
+                        logging.info(f"Processing chunk {i} with {tokens} tokens")
+                        await run_in_threadpool(
+                            vector_store.upsert,
+                            [
+                                (
+                                    f"{competition_id}_doc_{url}_{i}",
+                                    embedding,
+                                    {
+                                        "text": chunk,
+                                        "source": "documentation",
+                                        "url": url,
+                                        "title": page_data["title"],
+                                        "competition_id": competition_id,
+                                    },
+                                )
+                            ],
+                        )
+                    except ValueError as e:
+                        logging.warning(f"Skipping chunk due to: {str(e)}")
+
+        # Update competition status to 'completed'
+        await run_in_threadpool(
+            supabase_manager.update_competition, competition_id, {"status": "completed"}
+        )
+        logging.info(
+            f"Data ingestion completed successfully for competition {competition_id}"
+        )
+
+    except Exception as e:
+        logging.error(
+            f"Error during data ingestion for competition {competition_id}: {str(e)}"
+        )
+        # Update competition status to 'failed'
+        await run_in_threadpool(
+            supabase_manager.update_competition, competition_id, {"status": "failed"}
+        )
+        # Delete associated data from vector store
+        await run_in_threadpool(vector_store.delete_by_competition_id, competition_id)
 
 
 @app.post(
